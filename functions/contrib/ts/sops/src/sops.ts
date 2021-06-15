@@ -12,6 +12,7 @@ import { DumpOptions, safeDump, safeLoad } from 'js-yaml';
 import rw from 'rw';
 import { spawnSync, execSync } from 'child_process';
 import { JSONPath } from 'jsonpath-plus';
+import base64url from "base64url";
 
 const TEMP_PATH = '/tmp/tmp.yaml';
 
@@ -85,10 +86,21 @@ function isKubernetsObjectMatchesJsonPathFilter(o: KubernetesObject, jsonPathFil
 
 interface ConfigMap extends KubernetesObject {
   data?: { [key: string]: string };
+  binaryData?: {[key: string]: string};
 }
 
 function isConfigMap(o: any): o is ConfigMap {
   return o && o.apiVersion === 'v1' && o.kind === 'ConfigMap';
+}
+
+interface Secret extends KubernetesObject {
+  data?: { [key: string]: string };
+  stringData?: {[key: string]: string};
+}
+
+
+function isSecret(o: any): o is Secret {
+  return o && o.apiVersion === 'v1' && o.kind === 'Secret';
 }
 
 const YAML_STYLE: DumpOptions = {
@@ -267,12 +279,28 @@ function readSopsArguments(configs: Configs) {
       process.env.SOPS_IMPORT_AGE = value
     } else if (key === CMD_EXTRA_PARAMS_FILTER) {
       for (const object of configs.get(isConfigMap)) {
-	if (isKubernetsObjectMatchesJsonPathFilter(object, value) &&
-	    object.data != undefined) {
-	  for(const key in object.data) {
-            processArgument(object.data[key], key)
-          }
+	if (isKubernetsObjectMatchesJsonPathFilter(object, value)) {
+          if (object.data != undefined) {
+            for(const key in object.data) {
+              processArgument(object.data[key], key)
+            }
+	  }
+	  // possibly support object.binaryData if needed
 	}
+      }
+      for (const object of configs.get(isSecret)) {
+        if (isKubernetsObjectMatchesJsonPathFilter(object, value)) {
+          if (object.data != undefined) {
+            for(const key in object.data) {
+              processArgument(base64url.decode(base64url.fromBase64(object.data[key])), key)
+            }
+          }
+	  if (object.stringData != undefined) {
+            for(const key in object.stringData) {
+              processArgument(object.stringData[key], key)
+            }
+	  }
+        }
       }
     } else if (key === OVERRIDE_PREEXEC_CMD) {
       preExecCmd = value;
