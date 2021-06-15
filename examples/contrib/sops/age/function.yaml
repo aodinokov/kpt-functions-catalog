@@ -6,12 +6,11 @@ metadata:
     config.k8s.io/function: |
       container:
         image: gcr.io/kpt-fn-contrib/sops:unstable
-        envs:
-        - SOPS_IMPORT_AGE
-    config.kubernetes.io/local-config: "true"
+    config.kubernetes.io/local-config: 'true'
 data:
-  cmd: 'decrypt'
+  cmd: decrypt
   cmd-json-path-filter: '$[?(@.metadata.name=="toDecrypt")]'
+  cmd-extra-params-json-path-filter: '$[?(@.metadata.name=="keys")]'
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -21,10 +20,9 @@ metadata:
     config.k8s.io/function: |
       container:
         image: gcr.io/kpt-fn-contrib/sops:unstable
-    config.kubernetes.io/local-config: "true"
+    config.kubernetes.io/local-config: 'true'
 data:
-  cmd: 'encrypt'
+  cmd: encrypt
   cmd-json-path-filter: '$[?(@.metadata.name=="toEncrypt")]'
-  age: 'age1yt3tfqlfrwdwx0z0ynwplcr6qxcxfaqycuprpmy89nr83ltx74tqdpszlw'
-  unencrypted-regex: '^(kind|apiVersion|group|metadata)$'
-
+  cmd-extra-params-json-path-filter: '$[?(@.metadata.name=="keys")]'
+  unencrypted-regex: ^(kind|apiVersion|group|metadata)$

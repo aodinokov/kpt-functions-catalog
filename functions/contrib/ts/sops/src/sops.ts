@@ -18,6 +18,9 @@ const TEMP_PATH = '/tmp/tmp.yaml';
 const CMD = 'cmd';
 const CMD_FILTER = 'cmd-json-path-filter';
 const CMD_TOLERATE_FAILURES = 'cmd-tolerate-failures';
+const CMD_IMPORT_PGP = 'cmd-import-pgp';
+const CMD_IMPORT_AGE = 'cmd-import-age';
+const CMD_EXTRA_PARAMS_FILTER = 'cmd-extra-params-json-path-filter';
 const IGNORE_MAC = 'ignore-mac';
 const VERBOSE = 'verbose';
 const OVERRIDE_PREEXEC_CMD = 'override-preexec-cmd';
@@ -70,14 +73,22 @@ function isSopsKubernetesObject(
   return o && o.hasOwnProperty('sops');
 }
 
-function isKubernetsObjectToProcess(o: KubernetesObject): boolean {
-  if (cmdJsonPathFilter !== '') {
-    const items = JSONPath({ json: [o], path: cmdJsonPathFilter });
+function isKubernetsObjectMatchesJsonPathFilter(o: KubernetesObject, jsonPathFilter: string): boolean {
+  if (jsonPathFilter !== '') {
+    const items = JSONPath({ json: [o], path: jsonPathFilter });
     if (items.length === 0) {
       return false;
     }
   }
   return true;
+}
+
+interface ConfigMap extends KubernetesObject {
+  data?: { [key: string]: string };
+}
+
+function isConfigMap(o: any): o is ConfigMap {
+  return o && o.apiVersion === 'v1' && o.kind === 'ConfigMap';
 }
 
 const YAML_STYLE: DumpOptions = {
@@ -111,7 +122,7 @@ export async function sops(configs: Configs) {
 
   // run preexec if it's not empty
   if (preExecCmd !== '') {
-    execSync(preExecCmd);
+    execSync(preExecCmd, {env: process.env});
   }
 
   // Put all documents into the local place and
@@ -124,7 +135,7 @@ export async function sops(configs: Configs) {
     for (const object of allDocs) {
       if (
         isSopsKubernetesObject(object) &&
-        isKubernetsObjectToProcess(object)
+        isKubernetsObjectMatchesJsonPathFilter(object, cmdJsonPathFilter)
       ) {
         // decrypt and add
         await decryptAndInsertSopsKubernetesObject(args, configs, object);
@@ -136,7 +147,7 @@ export async function sops(configs: Configs) {
   } else if (cmd === 'encrypt') {
     configs.deleteAll();
     for (const object of allDocs) {
-      if (isKubernetsObjectToProcess(object)) {
+      if (isKubernetsObjectMatchesJsonPathFilter(object, cmdJsonPathFilter)) {
         // encrypt and add
         await encryptAndInsertKubernetesObject(args, configs, object);
       } else {
@@ -242,13 +253,27 @@ function readSopsArguments(configs: Configs) {
   if (!configMap) {
     return args;
   }
-  configMap.forEach((value: string, key: string) => {
+
+  const processArgument = (value: string, key: string) => {
     if (key === CMD) {
       cmd = value;
     } else if (key === CMD_FILTER) {
       cmdJsonPathFilter = value;
     } else if (key === CMD_TOLERATE_FAILURES && value !== 'false') {
       cmdTolerateFailures = true;
+    } else if (key === CMD_IMPORT_PGP) {
+      process.env.SOPS_IMPORT_PGP = value
+    } else if (key === CMD_IMPORT_AGE) {
+      process.env.SOPS_IMPORT_AGE = value
+    } else if (key === CMD_EXTRA_PARAMS_FILTER) {
+      for (const object of configs.get(isConfigMap)) {
+	if (isKubernetsObjectMatchesJsonPathFilter(object, value) &&
+	    object.data != undefined) {
+	  for(const key in object.data) {
+            processArgument(object.data[key], key)
+          }
+	}
+      }
     } else if (key === OVERRIDE_PREEXEC_CMD) {
       preExecCmd = value;
     } else if (key === OVERRIDE_DETACHED_ANNOTATIONS) {
@@ -259,6 +284,9 @@ function readSopsArguments(configs: Configs) {
       args.push('--' + key);
       args.push(value);
     }
+  }
+  configMap.forEach((value: string, key: string) => {
+    processArgument(value, key)
   });
   return args;
 }
